@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 /// Ana pencere: solda slayt listesi, ortada gösterilen slayt ve kontroller, sağda sunucu paneli.
 struct ContentView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.undoManager) private var undoManager
     @State private var isDropTargeted = false
 
     var body: some View {
@@ -36,8 +37,15 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
         }
-        .onChange(of: app.store.slides.count) {
-            app.presentation.ensureSelection()
+        .onChange(of: app.store.slides.map(\.id)) {
+            app.presentation.slidesDidChange()
+        }
+        // Düzen menüsündeki Geri Al / Yinele pencerenin yöneticisini kullanır.
+        .onAppear {
+            app.store.undoManager = undoManager
+        }
+        .onChange(of: undoManager) {
+            app.store.undoManager = undoManager
         }
         .alert("Bazı dosyalar eklenemedi", isPresented: skippedAlertBinding) {
             Button("Tamam") {}
@@ -69,7 +77,11 @@ struct ContentView: View {
         let names = app.store.skippedFiles
         let listed = names.prefix(8).joined(separator: "\n")
         let more = names.count > 8 ? "\n… ve \(names.count - 8) dosya daha" : ""
-        return "Bu dosyalar desteklenen bir resim ya da video biçiminde değil:\n\(listed)\(more)"
+        let presentationFiles = names.contains { ["pptx", "ppt", "key"].contains(($0 as NSString).pathExtension.lowercased()) }
+        let hint = presentationFiles
+            ? "\n\nPowerPoint ya da Keynote sunumunu PDF olarak dışa aktarıp ekleyebilirsin; her sayfa bir slayt olur."
+            : ""
+        return "Bu dosyalar desteklenen bir resim, video, ses ya da PDF biçiminde değil:\n\(listed)\(more)\(hint)"
     }
 }
 
@@ -122,10 +134,22 @@ private struct CurrentSlidePane: View {
             slide: presentation.currentSlide,
             package: app.store.package,
             images: app.images,
-            player: app.playback.player
+            player: app.playback.player,
+            generation: presentation.transitionGeneration,
+            transitionDuration: presentation.activeTransitionDuration
         )
-        .aspectRatio(16 / 9, contentMode: .fit)
+        .aspectRatio(presentation.outputAspect, contentMode: .fit)
         .clipShape(shape)
+        .overlay(alignment: .bottomLeading) {
+            if presentation.currentSlide?.kind == .audio {
+                Label("Ses", systemImage: "music.note")
+                    .font(.callout.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.6), in: Capsule())
+                    .padding(12)
+            }
+        }
         .overlay {
             if presentation.isBlackedOut {
                 shape.fill(.black.opacity(0.85))
@@ -190,7 +214,7 @@ struct MainToolbar: ToolbarContent {
             .help("Resim veya video ekle (⌘I)")
         }
         ToolbarItem(placement: .primaryAction) {
-            OutputMenu(screens: app.screens)
+            OutputMenu(screens: app.screens, presentation: app.presentation)
         }
         ToolbarItem(placement: .primaryAction) {
             BlackoutButton(presentation: app.presentation)
@@ -203,6 +227,7 @@ struct MainToolbar: ToolbarContent {
 
 private struct OutputMenu: View {
     @Bindable var screens: ScreenManager
+    @Bindable var presentation: PresentationController
 
     var body: some View {
         Menu {
@@ -215,6 +240,13 @@ private struct OutputMenu: View {
                 Text("Pencere (önizleme)").tag(OutputTarget.window)
             }
             .pickerStyle(.inline)
+            Picker("Slayt geçişi", selection: $presentation.transitionDuration) {
+                Text("Geçiş yok").tag(0.0)
+                Text("Hızlı (0,3 sn)").tag(0.3)
+                Text("Normal (0,5 sn)").tag(0.5)
+                Text("Yavaş (1 sn)").tag(1.0)
+            }
+            .pickerStyle(.inline)
             if screens.isMirroring {
                 Divider()
                 Text("Ekran yansıtma açık. Ayrı çıkış için Sistem Ayarları › Ekranlar'dan “Genişletilmiş ekran”ı seç.")
@@ -222,7 +254,7 @@ private struct OutputMenu: View {
         } label: {
             Label("Çıkış", systemImage: "display.2")
         }
-        .help("Sunumun yansıtılacağı ekran")
+        .help("Çıkış ekranı ve slayt geçişi")
     }
 }
 

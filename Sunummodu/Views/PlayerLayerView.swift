@@ -4,15 +4,26 @@ import SwiftUI
 /// Oynatıcının görüntüsünü gösteren katman. Aynı `AVPlayer` birden çok görünümde gösterilebilir.
 struct PlayerLayerView: NSViewRepresentable {
     let player: AVPlayer
+    /// true ise video ekranı doldurur (kenarlar kırpılır), değilse tamamı sığdırılır.
+    var fills = false
 
     func makeNSView(context: Context) -> PlayerNSView {
-        PlayerNSView(player: player)
+        let view = PlayerNSView(player: player)
+        view.playerLayer.videoGravity = gravity
+        return view
     }
 
     func updateNSView(_ view: PlayerNSView, context: Context) {
         if view.playerLayer.player !== player {
             view.playerLayer.player = player
         }
+        if view.playerLayer.videoGravity != gravity {
+            view.playerLayer.videoGravity = gravity
+        }
+    }
+
+    private var gravity: AVLayerVideoGravity {
+        fills ? .resizeAspectFill : .resizeAspect
     }
 }
 
@@ -23,8 +34,8 @@ final class PlayerNSView: NSView {
     init(player: AVPlayer) {
         super.init(frame: .zero)
         wantsLayer = true
+        layer?.masksToBounds = true
         playerLayer.player = player
-        playerLayer.videoGravity = .resizeAspect
         // İlk kare hazır olana kadar görünmez; alttaki poster kare görünür kalır.
         playerLayer.opacity = 0
         layer?.addSublayer(playerLayer)

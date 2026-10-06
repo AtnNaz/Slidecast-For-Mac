@@ -55,8 +55,17 @@ struct AppCommands: Commands {
             Button("Farklı Kaydet…") { app.saveAs() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
             Divider()
-            Button("Resim / Video Ekle…") { app.addMedia() }
+            Button("Dosya Ekle…") { app.addMedia() }
                 .keyboardShortcut("i")
+        }
+        CommandMenu("Slayt") {
+            Button("Çoğalt") { app.duplicateSelection() }
+                .keyboardShortcut("d")
+            Button("Yeniden Adlandır…") { app.beginRenamingSelection() }
+            Button("Sığdır / Ekranı Doldur") { app.toggleFillForSelection() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+            Divider()
+            Button("Sil") { app.deleteSelection() }
         }
         CommandMenu("Sunum") {
             Button("Sunumu Başlat / Bitir") { app.presentation.togglePresenting() }
@@ -66,7 +75,7 @@ struct AppCommands: Commands {
             Button("Sonraki Slayt  (→)") { app.presentation.next() }
             Button("Önceki Slayt  (←)") { app.presentation.previous() }
             Divider()
-            Button("Videoyu Başlat / Durdur  (Boşluk)") { app.playback.togglePlayPause() }
+            Button("Başlat / Durdur  (Boşluk)") { app.playback.togglePlayPause() }
             Button("Sesi Yükselt  (+)") { app.playback.adjustVolume(by: PlaybackController.volumeStep) }
             Button("Sesi Alçalt  (−)") { app.playback.adjustVolume(by: -PlaybackController.volumeStep) }
             Button("Sesi Kapat / Aç  (M)") { app.playback.toggleMute() }

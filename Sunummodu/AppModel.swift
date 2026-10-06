@@ -13,6 +13,8 @@ final class AppModel {
     let images: ImageStore
     let presentation: PresentationController
     var errorMessage: String?
+    /// Yeniden adlandırma penceresi açık olan slayt.
+    var renamingID: Slide.ID?
 
     @ObservationIgnored private let keyboard = KeyboardHandler()
     @ObservationIgnored private let defaults = UserDefaults.standard
@@ -24,11 +26,16 @@ final class AppModel {
             ? FileManager.default.temporaryDirectory.appendingPathComponent("SunummoduTestHost-\(UUID().uuidString).sunum")
             : Self.defaultDraftURL
 
+        // Testler kullanıcının ses ve geçiş ayarlarını okumasın, değiştirmesin.
+        let settings: SettingsStore = isRunningTests ? InMemorySettings() : UserDefaults.standard
+
         store = DeckStore(draftURL: draftURL)
-        playback = PlaybackController()
+        playback = PlaybackController(settings: settings)
         screens = ScreenManager()
         images = ImageStore()
-        presentation = PresentationController(store: store, playback: playback, screens: screens, images: images)
+        presentation = PresentationController(
+            store: store, playback: playback, screens: screens, images: images, settings: settings
+        )
 
         if !isRunningTests {
             if let path = defaults.string(forKey: Self.lastDeckKey) {
@@ -100,10 +107,10 @@ final class AppModel {
 
     func addMedia() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image, .movie]
+        panel.allowedContentTypes = [.image, .movie, .audio, .pdf]
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
-        panel.message = "Sunuma eklenecek resim ve videoları seç"
+        panel.message = "Sunuma eklenecek resim, video, ses ya da PDF dosyalarını seç"
         panel.prompt = "Ekle"
         guard panel.runModal() == .OK else { return }
         importFiles(panel.urls)
@@ -128,21 +135,69 @@ final class AppModel {
         }
     }
 
-    /// Silme geri alınamadığı için önce sorar.
-    func requestDelete(_ id: Slide.ID) {
+    // MARK: Seçili slaytlar
+
+    func deleteSelection() {
+        presentation.delete(presentation.selection)
+    }
+
+    func duplicateSelection() {
+        let ids = presentation.selection
+        Task {
+            let copies = await store.duplicate(ids)
+            if !copies.isEmpty {
+                presentation.select(Set(copies))
+            }
+        }
+    }
+
+    /// Seçili slaytların hepsi ekranı dolduruyorsa sığdırmaya, değilse doldurmaya çevirir.
+    func toggleFillForSelection() {
+        setFill(!isFilled(presentation.selection), for: presentation.selection)
+    }
+
+    func isFilled(_ ids: Set<Slide.ID>) -> Bool {
+        let slides = store.slides.filter { ids.contains($0.id) }
+        return !slides.isEmpty && slides.allSatisfy { $0.scaling == .fill }
+    }
+
+    func setFill(_ fill: Bool, for ids: Set<Slide.ID>) {
+        store.setScaling(fill ? .fill : .fit, for: ids)
+    }
+
+    func beginRenamingSelection() {
+        guard presentation.selection.count == 1 else { return }
+        renamingID = presentation.selection.first
+    }
+
+    /// Ses slaytında sahnede gösterilecek görseli seçtirir.
+    func chooseArtwork(for id: Slide.ID) {
         guard let slide = store.slides.first(where: { $0.id == id }) else { return }
-        let alert = NSAlert()
-        alert.messageText = "“\(slide.title)” slaytı silinsin mi?"
-        alert.informativeText = "Bu işlem geri alınamaz. Eklediğin dosyanın aslı etkilenmez."
-        alert.addButton(withTitle: "Sil").hasDestructiveAction = true
-        alert.addButton(withTitle: "Vazgeç")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        presentation.delete(id)
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.message = "“\(slide.title)” çalarken ekranda gösterilecek görseli seç"
+        panel.prompt = "Seç"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let package = store.package
+        Task {
+            do {
+                try await MediaImporter.setArtwork(from: url, for: slide, in: package)
+            } catch {
+                errorMessage = "“\(url.lastPathComponent)” görsel olarak kullanılamadı."
+            }
+            images.removeAll()
+        }
+    }
+
+    func removeArtwork(for id: Slide.ID) {
+        guard let slide = store.slides.first(where: { $0.id == id }) else { return }
+        MediaImporter.removeArtwork(for: slide, in: store.package)
+        images.removeAll()
     }
 
     func shutdown() {
         presentation.stop()
-        store.flush()
+        store.close()
     }
 
     private func deckChanged() {

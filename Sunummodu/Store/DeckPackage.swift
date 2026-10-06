@@ -25,17 +25,22 @@ nonisolated struct DeckPackage: Equatable, Sendable {
         thumbsDirectory.appendingPathComponent("\(slide.id.uuidString).jpg")
     }
 
-    /// Videonun ilk karesi; oynatıcı hazır olana kadar sahnede bu gösterilir.
+    /// Videonun ilk karesi (oynatıcı hazır olana kadar sahnede bu gösterilir) ya da ses slaytının görseli.
     func posterURL(for slide: Slide) -> URL {
         thumbsDirectory.appendingPathComponent("\(slide.id.uuidString)-poster.jpg")
     }
 
-    /// Sahnede gösterilecek durağan görüntü: resmin kendisi ya da videonun poster karesi.
+    /// Sahnede gösterilecek durağan görüntü: resmin kendisi ya da video / sesin poster görseli.
     func stageImageURL(for slide: Slide) -> URL {
         switch slide.kind {
         case .image: mediaURL(for: slide)
-        case .video: posterURL(for: slide)
+        case .video, .audio: posterURL(for: slide)
         }
+    }
+
+    /// Slayta ait olabilecek bütün dosyalar.
+    func fileURLs(for slide: Slide) -> [URL] {
+        [mediaURL(for: slide), thumbnailURL(for: slide), posterURL(for: slide)]
     }
 
     func createDirectories() throws {

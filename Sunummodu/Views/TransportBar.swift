@@ -53,9 +53,9 @@ private struct ProgressRow: View {
         }
         .font(.callout.monospacedDigit())
         .foregroundStyle(.secondary)
-        .disabled(!playback.hasVideo)
-        .opacity(playback.hasVideo ? 1 : 0.35)
-        .help(playback.hasVideo ? "Videoda ileri / geri sar" : "Bu slaytta video yok")
+        .disabled(!playback.hasMedia)
+        .opacity(playback.hasMedia ? 1 : 0.35)
+        .help(playback.hasMedia ? "İleri / geri sar" : "Bu slaytta video ya da ses yok")
     }
 }
 
@@ -89,7 +89,7 @@ private struct NavigationButtons: View {
         .fixedSize()
     }
 
-    /// Yalnızca video varken vurgulu; resim slaytında sönük ve devre dışı.
+    /// Yalnızca video ya da ses varken vurgulu; resim slaytında sönük ve devre dışı.
     @ViewBuilder private var playPauseButton: some View {
         let button = Button {
             playback.togglePlayPause()
@@ -97,14 +97,14 @@ private struct NavigationButtons: View {
             Label(playback.isPlaying ? "Durdur" : "Başlat", systemImage: playback.isPlaying ? "pause.fill" : "play.fill")
                 .frame(minWidth: 76)
         }
-        if playback.hasVideo {
+        if playback.hasMedia {
             button
                 .buttonStyle(.borderedProminent)
-                .help("Videoyu başlat / durdur (Boşluk)")
+                .help("Başlat / durdur (Boşluk)")
         } else {
             button
                 .disabled(true)
-                .help("Bu slaytta video yok")
+                .help("Bu slaytta video ya da ses yok")
         }
     }
 }

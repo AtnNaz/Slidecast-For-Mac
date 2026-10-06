@@ -47,14 +47,27 @@ struct SnapshotTests {
 
         try await capture(window, as: "1-bos")
 
+        // Örnek klasör: 2 resim, video, dikey resim, 2 sayfalı PDF, ses.
         await app.store.importFiles([sampleDirectory])
+        let ids = app.store.slides.map(\.id)
+        let videoIndex = try #require(app.store.slides.firstIndex { $0.kind == .video })
+        let audioIndex = try #require(app.store.slides.firstIndex { $0.kind == .audio })
         try await capture(window, as: "2-ilk-slayt")
 
-        let videoIndex = try #require(app.store.slides.firstIndex { $0.kind == .video })
-        app.presentation.go(toIndex: videoIndex)
-        try await capture(window, as: "3-video-secili")
+        // Çoklu seçim, sığdır / doldur ve ses slaytına görsel.
+        app.setFill(true, for: [ids[1], ids[3]])
+        app.presentation.select([ids[1]])
+        app.presentation.select([ids[1], ids[2], ids[3]])
+        try await capture(window, as: "3-coklu-secim-ve-doldur")
+        try await MediaImporter.setArtwork(
+            from: app.store.package.mediaURL(for: app.store.slides[0]), for: app.store.slides[audioIndex],
+            in: app.store.package
+        )
+        app.images.removeAll()
+        app.store.setNotes("Videodan önce konuyu tanıt.\nBitince soru al.", for: ids[videoIndex])
 
-        app.store.setNotes("Videodan önce konuyu tanıt.\nBitince soru al.", for: app.store.slides[videoIndex].id)
+        // Sunum: geçişin ortası yakalanabilsin diye uzun bir geçiş süresi.
+        app.presentation.transitionDuration = 2
         app.presentation.goToFirst()
         app.presentation.start()
         try await capture(window, as: "4-sunum-resim")
@@ -62,31 +75,59 @@ struct SnapshotTests {
         let outputWindow = try #require(NSApp.windows.first { candidate in
             (candidate.contentView as? NSHostingView<OutputView>)?.rootView.presentation === app.presentation
         })
-        try await capture(outputWindow, as: "4-cikis-resim")
+        let before = try await capture(outputWindow, as: "4-cikis-resim")
+
+        // Resimden resme yumuşak geçiş: ortasında renkler iki slaytın arasında olmalı, kararmamalı.
+        app.presentation.next()
+        let middle = try await capture(outputWindow, as: "5-gecis-ortasi", after: .milliseconds(1000))
+        let after = try await capture(outputWindow, as: "5-gecis-sonu", after: .milliseconds(1800))
+        if let from = backgroundColor(of: before), let mid = backgroundColor(of: middle), let to = backgroundColor(of: after) {
+            for channel in 0..<3 {
+                #expect(mid[channel] > min(from[channel], to[channel]) - 0.03)
+                #expect(mid[channel] < max(from[channel], to[channel]) + 0.03)
+            }
+            #expect(abs(mid[2] - from[2]) > 0.02 || abs(mid[0] - from[0]) > 0.02)
+            #expect(abs(mid[2] - to[2]) > 0.02 || abs(mid[0] - to[0]) > 0.02)
+        }
 
         app.presentation.go(toIndex: videoIndex)
-        #expect(await waitUntil { app.playback.isPlaying && app.playback.currentTime > 0.5 })
-        // Aynı oynatıcı hem önizlemede hem çıkışta görüntü veriyor olmalı.
+        #expect(await waitUntil { app.playback.isPlaying && app.playback.currentTime > 2.5 })
+        // Geçiş bittikten sonra aynı oynatıcı hem önizlemede hem çıkışta görüntü veriyor olmalı.
         let playerViews = [window, outputWindow].flatMap { playerViews(in: $0.contentView) }
         #expect(playerViews.count == 2)
         #expect(await waitUntil { playerViews.allSatisfy { $0.playerLayer.isReadyForDisplay && $0.playerLayer.opacity == 1 } })
-        try await capture(window, as: "5-sunum-video")
-        try await capture(outputWindow, as: "5-cikis-video")
+        try await capture(window, as: "6-sunum-video", after: .milliseconds(100))
+
+        // Videodan resme geçişin ortası: giden video hâlâ görünüyor olmalı.
+        app.presentation.next()
+        try await capture(outputWindow, as: "7-gecis-ortasi-videodan", after: .milliseconds(1000))
+        try await capture(window, as: "7-gecis-sonu-doldur", after: .milliseconds(1500))
 
         app.presentation.toggleBlackout()
-        try await capture(window, as: "6-karartma")
-        try await capture(outputWindow, as: "6-cikis-karartma")
+        try await capture(outputWindow, as: "8-cikis-karartma", after: .milliseconds(2300))
+        try await capture(window, as: "8-karartma", after: .milliseconds(100))
         app.presentation.toggleBlackout()
 
-        app.presentation.goToLast()
+        app.presentation.transitionDuration = 0
+        app.presentation.go(toIndex: audioIndex)
+        #expect(await waitUntil { app.playback.isPlaying })
+        try await capture(window, as: "9-ses-slayti")
+        try await capture(outputWindow, as: "9-cikis-ses-slayti", after: .milliseconds(100))
+
+        app.renamingID = ids[0]
+        try await capture(window, as: "10-yeniden-adlandir")
+        app.renamingID = nil
+
         window.setContentSize(NSSize(width: 1120, height: 640))
-        try await capture(window, as: "7-dar-pencere-son-slayt")
+        try await capture(window, as: "11-dar-pencere")
     }
 
-    private func capture(_ window: NSWindow, as name: String) async throws {
-        try await Task.sleep(for: .milliseconds(700))
+    @discardableResult
+    private func capture(_ window: NSWindow, as name: String, after delay: Duration = .milliseconds(700)) async throws -> CGImage? {
+        try await Task.sleep(for: delay)
+        let composited = compositedImage(of: window)
         let bitmap: NSBitmapImageRep
-        if let composited = compositedImage(of: window) {
+        if let composited {
             bitmap = NSBitmapImageRep(cgImage: composited)
         } else {
             let view = try #require(window.contentView?.superview ?? window.contentView)
@@ -96,6 +137,15 @@ struct SnapshotTests {
         }
         let png = try #require(bitmap.representation(using: .png, properties: [:]))
         try png.write(to: outputDirectory.appendingPathComponent("\(name).png"))
+        return composited
+    }
+
+    /// Slayt zemininden (ortadaki yazının üstünden) bir pikselin kırmızı, yeşil, mavi değerleri (0–1).
+    private func backgroundColor(of image: CGImage?) -> [Double]? {
+        guard let image else { return nil }
+        let color = NSBitmapImageRep(cgImage: image).colorAt(x: image.width / 2, y: image.height / 4)?
+            .usingColorSpace(.sRGB)
+        return color.map { [Double($0.redComponent), Double($0.greenComponent), Double($0.blueComponent)] }
     }
 
     /// Pencerenin ekrandaki gerçek görüntüsü (video ve saydam yüzeyler dahil). Swift'e kapalı olan

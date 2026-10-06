@@ -5,11 +5,17 @@ import Testing
 @Suite struct DeckStoreTests {
     let temp: TemporaryDirectory
     let store: DeckStore
+    let undoManager = UndoManager()
 
     init() throws {
         temp = try TemporaryDirectory()
         store = DeckStore(draftURL: temp.file("Taslak.sunum"))
+        // Uygulamada her kullanıcı işlemi ayrı olaydır; testte her işlem ayrı adım olsun.
+        undoManager.groupsByEvent = false
+        store.undoManager = undoManager
     }
+
+    private var titles: [String] { store.slides.map(\.title) }
 
     private func makeImages(_ names: String...) throws -> [URL] {
         try names.map { name in
@@ -157,5 +163,140 @@ import Testing
         #expect(store.slides.isEmpty)
         #expect(!fileExists(media))
         #expect(fileExists(store.package.manifestURL))
+    }
+
+    // MARK: Geri alma
+
+    @Test func undoRestoresRemovedSlideWithItsFiles() async throws {
+        await store.importFiles(try makeImages("a.png", "b.png", "c.png"))
+        let removed = store.slides[1]
+        let media = store.package.mediaURL(for: removed)
+
+        store.remove(removed.id)
+        #expect(titles == ["a", "c"])
+        #expect(!fileExists(media))
+        #expect(undoManager.undoActionName == "Slaytı Sil")
+
+        undoManager.undo()
+        #expect(titles == ["a", "b", "c"])
+        #expect(fileExists(media))
+        #expect(fileExists(store.package.thumbnailURL(for: removed)))
+
+        undoManager.redo()
+        #expect(titles == ["a", "c"])
+        #expect(!fileExists(media))
+    }
+
+    @Test func removingSeveralSlidesIsOneUndoStep() async throws {
+        await store.importFiles(try makeImages("a.png", "b.png", "c.png", "d.png"))
+        store.remove([store.slides[0].id, store.slides[2].id])
+        #expect(titles == ["b", "d"])
+        #expect(undoManager.undoActionName == "Slaytları Sil")
+
+        undoManager.undo()
+        #expect(titles == ["a", "b", "c", "d"])
+        #expect(store.slides.allSatisfy { fileExists(store.package.mediaURL(for: $0)) })
+    }
+
+    @Test func undoRevertsReorderButKeepsLaterNotes() async throws {
+        await store.importFiles(try makeImages("a.png", "b.png", "c.png"))
+        store.move(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        #expect(titles == ["c", "a", "b"])
+        store.setNotes("sonradan yazıldı", for: store.slides[1].id)
+
+        undoManager.undo()
+        #expect(titles == ["a", "b", "c"])
+        #expect(store.slides[0].notes == "sonradan yazıldı")
+    }
+
+    @Test func wholeImportIsOneUndoStep() async throws {
+        await store.importFiles(try makeImages("a.png"))
+        await store.importFiles(try makeImages("b.png", "c.png"), at: 0)
+        #expect(titles == ["b", "c", "a"])
+        let imported = Array(store.slides[0...1])
+
+        undoManager.undo()
+        #expect(titles == ["a"])
+        #expect(imported.allSatisfy { !fileExists(store.package.mediaURL(for: $0)) })
+
+        undoManager.redo()
+        #expect(titles == ["b", "c", "a"])
+        #expect(imported.allSatisfy { fileExists(store.package.mediaURL(for: $0)) })
+    }
+
+    @Test func duplicatePlacesCopiesAfterOriginals() async throws {
+        await store.importFiles(try makeImages("a.png", "b.png", "c.png"))
+        store.setNotes("not", for: store.slides[0].id)
+
+        let copies = await store.duplicate([store.slides[0].id, store.slides[2].id])
+
+        #expect(titles == ["a", "a kopya", "b", "c", "c kopya"])
+        #expect(copies == [store.slides[1].id, store.slides[4].id])
+        #expect(store.slides[1].notes == "not")
+        #expect(Set(store.slides.map(\.id)).count == 5)
+        #expect(Set(store.slides.map(\.fileName)).count == 5)
+        #expect(store.slides.allSatisfy { fileExists(store.package.mediaURL(for: $0)) })
+        #expect(store.slides.allSatisfy { fileExists(store.package.thumbnailURL(for: $0)) })
+
+        undoManager.undo()
+        #expect(titles == ["a", "b", "c"])
+    }
+
+    @Test func renameAndScalingCanBeUndone() async throws {
+        await store.importFiles(try makeImages("a.png", "b.png"))
+        let ids = Set(store.slides.map(\.id))
+
+        store.setTitle("Kapak", for: store.slides[0].id)
+        store.setScaling(.fill, for: ids)
+        #expect(titles == ["Kapak", "b"])
+        #expect(store.slides.allSatisfy { $0.scaling == .fill })
+
+        undoManager.undo()
+        #expect(store.slides.allSatisfy { $0.scaling == .fit })
+        undoManager.undo()
+        #expect(titles == ["a", "b"])
+        undoManager.redo()
+        undoManager.redo()
+        #expect(titles == ["Kapak", "b"])
+        #expect(store.slides.allSatisfy { $0.scaling == .fill })
+    }
+
+    @Test func undoHistoryDoesNotCrossDecks() async throws {
+        await store.importFiles(try makeImages("a.png"))
+        let saved = temp.file("Kayıtlı.sunum")
+        try store.saveAs(to: saved)
+        store.remove(store.slides[0].id)
+        #expect(undoManager.canUndo)
+
+        try store.resetDraft()
+        #expect(!undoManager.canUndo)
+        #expect(store.slides.isEmpty)
+    }
+
+    @Test func undoStillWorksAfterSaveAs() async throws {
+        await store.importFiles(try makeImages("a.png", "b.png"))
+        let removed = store.slides[0]
+        store.remove(removed.id)
+
+        try store.saveAs(to: temp.file("Kayıtlı.sunum"))
+        undoManager.undo()
+
+        #expect(titles == ["a", "b"])
+        #expect(fileExists(store.package.mediaURL(for: removed)))
+    }
+
+    @Test func readsDecksWrittenBeforeScalingExisted() throws {
+        let id = UUID()
+        let json = """
+        {"version":1,"slides":[{"id":"\(id.uuidString)","kind":"image","fileName":"x.png","title":"Eski","notes":""}]}
+        """
+        let package = DeckPackage(url: temp.file("Eski.sunum"))
+        try package.createDirectories()
+        try Data(json.utf8).write(to: package.manifestURL)
+
+        try store.open(package.url)
+
+        #expect(store.slides == [Slide(id: id, kind: .image, fileName: "x.png", title: "Eski")])
+        #expect(store.slides[0].scaling == .fit)
     }
 }

@@ -39,6 +39,12 @@ final class KeyboardHandler {
             return true
         }
 
+        let arrows = [KeyCode.leftArrow, KeyCode.rightArrow, KeyCode.upArrow, KeyCode.downArrow]
+        if event.modifierFlags.contains(.shift), arrows.contains(event.keyCode) {
+            // ⇧ + ok listede seçimi genişletir.
+            return false
+        }
+
         let playback = presentation.playback
         switch event.keyCode {
         case KeyCode.rightArrow, KeyCode.downArrow, KeyCode.pageDown, KeyCode.returnKey, KeyCode.keypadEnter:
@@ -50,7 +56,7 @@ final class KeyboardHandler {
         case KeyCode.end:
             presentation.goToLast()
         case KeyCode.space:
-            if playback.hasVideo {
+            if playback.hasMedia {
                 playback.togglePlayPause()
             } else {
                 presentation.next()

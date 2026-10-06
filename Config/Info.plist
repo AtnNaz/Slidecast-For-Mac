@@ -20,7 +20,7 @@
 		</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Resim ya da Video</string>
+			<string>Resim, Video, Ses ya da PDF</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
@@ -29,6 +29,8 @@
 			<array>
 				<string>public.image</string>
 				<string>public.movie</string>
+				<string>public.audio</string>
+				<string>com.adobe.pdf</string>
 			</array>
 		</dict>
 	</array>

@@ -38,6 +38,28 @@ enum TestMedia {
         guard CGImageDestinationFinalize(destination) else { throw CocoaError(.fileWriteUnknown) }
     }
 
+    /// Her biri verilen boyutta sayfalardan oluşan bir PDF yazar.
+    static func writePDF(to url: URL, pageSizes: [CGSize]) throws {
+        guard let context = CGContext(url as CFURL, mediaBox: nil, nil) else { throw CocoaError(.fileWriteUnknown) }
+        for size in pageSizes {
+            var box = CGRect(origin: .zero, size: size)
+            context.beginPage(mediaBox: &box)
+            context.setFillColor(CGColor(red: 0.9, green: 0.3, blue: 0.2, alpha: 1))
+            context.fill(box.insetBy(dx: 20, dy: 20))
+            context.endPage()
+        }
+        context.closePDF()
+    }
+
+    /// Sessiz bir WAV dosyası yazar.
+    static func writeAudio(to url: URL, seconds: Double = 1) throws {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(44_100 * seconds))
+        else { throw CocoaError(.fileWriteUnknown) }
+        buffer.frameLength = buffer.frameCapacity
+        try AVAudioFile(forWriting: url, settings: format.settings).write(from: buffer)
+    }
+
     /// Sessiz, kısa bir H.264 video yazar.
     static func writeVideo(to url: URL, seconds: Int = 1) async throws {
         let width = 160

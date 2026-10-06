@@ -10,11 +10,12 @@ import Testing
     init() async throws {
         temp = try TemporaryDirectory()
         let store = DeckStore(draftURL: temp.file("Taslak.sunum"))
-        let defaults = try #require(UserDefaults(suiteName: "SunummoduTests-\(UUID().uuidString)"))
+        let settings = InMemorySettings()
         let screens = ScreenManager()
         screens.target = .window
         presentation = PresentationController(
-            store: store, playback: PlaybackController(defaults: defaults), screens: screens, images: ImageStore()
+            store: store, playback: PlaybackController(settings: settings), screens: screens, images: ImageStore(),
+            settings: settings
         )
         let a = temp.file("a.png")
         let clip = temp.file("klip.mov")
@@ -23,7 +24,7 @@ import Testing
         try await TestMedia.writeVideo(to: clip)
         try TestMedia.writePNG(to: b)
         await store.importFiles([a, clip, b])
-        presentation.ensureSelection()
+        presentation.slidesDidChange()
     }
 
     /// Olay tüketildiyse true döner.
@@ -91,6 +92,12 @@ import Testing
         #expect(try !press(keyCode: 124, modifiers: .command))
         #expect(try !press(characters: "s", modifiers: .command))
         #expect(try !press(characters: "x"))
+        #expect(presentation.currentIndex == 0)
+    }
+
+    @Test func shiftArrowsAreLeftToTheListForExtendingSelection() throws {
+        #expect(try !press(keyCode: 125, modifiers: .shift))
+        #expect(try !press(keyCode: 124, modifiers: .shift))
         #expect(presentation.currentIndex == 0)
     }
 
