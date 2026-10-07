@@ -32,6 +32,13 @@ import Testing
         #expect(fileExists(store.package.manifestURL))
     }
 
+    @Test func draftNameIsShownUntilSaved() throws {
+        let named = DeckStore(draftURL: temp.file("Deneme.sunum"), draftName: "Deneme Sunumu")
+        #expect(named.displayName == "Deneme Sunumu")
+        try named.saveAs(to: temp.file("Kayıtlı.sunum"))
+        #expect(named.displayName == "Kayıtlı")
+    }
+
     @Test func importCopiesMediaAndKeepsOrder() async throws {
         let sources = try makeImages("a.png", "b.png")
         await store.importFiles(sources)

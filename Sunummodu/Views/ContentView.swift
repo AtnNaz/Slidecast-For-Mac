@@ -20,7 +20,7 @@ struct ContentView: View {
             }
         }
         .navigationTitle(app.store.displayName)
-        .navigationSubtitle(app.store.slides.isEmpty ? "" : "\(app.store.slides.count) slayt")
+        .navigationSubtitle(subtitle)
         .toolbar {
             MainToolbar(app: app)
         }
@@ -57,6 +57,11 @@ struct ContentView: View {
         } message: {
             Text(app.errorMessage ?? "")
         }
+    }
+
+    private var subtitle: String {
+        let count = app.store.slides.isEmpty ? nil : "\(app.store.slides.count) slayt"
+        return [app.isTestMode ? "Deneme modu" : nil, count].compactMap { $0 }.joined(separator: " · ")
     }
 
     private var skippedAlertBinding: Binding<Bool> {

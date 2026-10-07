@@ -15,6 +15,8 @@ final class DeckStore {
 
     /// Kaydedilmemiş sunumun tutulduğu paket.
     let draftURL: URL
+    /// Kaydedilmemiş sunumun pencere başlığında görünen adı.
+    let draftName: String
     /// Pencerenin geri alma yöneticisi; arayüz bağlar. nil iken değişiklikler geri alınamaz.
     @ObservationIgnored var undoManager: UndoManager?
 
@@ -27,11 +29,12 @@ final class DeckStore {
     var isDraft: Bool { package == DeckPackage(url: draftURL) }
     var isImporting: Bool { importDone < importTotal }
     var displayName: String {
-        isDraft ? "Adsız Sunum" : package.url.deletingPathExtension().lastPathComponent
+        isDraft ? draftName : package.url.deletingPathExtension().lastPathComponent
     }
 
-    init(draftURL: URL) {
+    init(draftURL: URL, draftName: String = "Adsız Sunum") {
         self.draftURL = draftURL
+        self.draftName = draftName
         package = DeckPackage(url: draftURL)
         do {
             if FileManager.default.fileExists(atPath: package.manifestURL.path) {

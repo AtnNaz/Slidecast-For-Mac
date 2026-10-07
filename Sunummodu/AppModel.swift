@@ -13,23 +13,33 @@ final class AppModel {
     let images: ImageStore
     let presentation: PresentationController
     var errorMessage: String?
+    /// Uygulama `-denemeModu YES` ile başlatıldıysa true. Deneme modu ayrı ve her açılışta boşaltılan bir
+    /// sunumla çalışır; kullanıcının kendi taslağına ve "son açılan sunum" kaydına dokunmaz.
+    let isTestMode: Bool
     /// Yeniden adlandırma penceresi açık olan slayt.
     var renamingID: Slide.ID?
 
     @ObservationIgnored private let keyboard = KeyboardHandler()
     @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let remembersLastDeck: Bool
 
     init() {
         // Birim testleri uygulamanın içinde çalışır; kullanıcının sunumuna ve klavyesine dokunulmaz.
         let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        let draftURL = isRunningTests
-            ? FileManager.default.temporaryDirectory.appendingPathComponent("SunummoduTestHost-\(UUID().uuidString).sunum")
-            : Self.defaultDraftURL
+        isTestMode = !isRunningTests && defaults.bool(forKey: "denemeModu")
+        remembersLastDeck = !isRunningTests && !isTestMode
+        let draftURL: URL
+        if isRunningTests {
+            draftURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("SunummoduTestHost-\(UUID().uuidString).sunum")
+        } else {
+            draftURL = Self.draftURL(named: isTestMode ? "Deneme" : "Taslak")
+        }
 
         // Testler kullanıcının ses ve geçiş ayarlarını okumasın, değiştirmesin.
         let settings: SettingsStore = isRunningTests ? InMemorySettings() : UserDefaults.standard
 
-        store = DeckStore(draftURL: draftURL)
+        store = DeckStore(draftURL: draftURL, draftName: isTestMode ? "Deneme Sunumu" : "Adsız Sunum")
         playback = PlaybackController(settings: settings)
         screens = ScreenManager()
         images = ImageStore()
@@ -37,18 +47,22 @@ final class AppModel {
             store: store, playback: playback, screens: screens, images: images, settings: settings
         )
 
+        if isTestMode {
+            // Her deneme temiz bir sunumla başlar.
+            try? store.resetDraft()
+        }
+        if remembersLastDeck, let path = defaults.string(forKey: Self.lastDeckKey) {
+            try? store.open(URL(fileURLWithPath: path))
+        }
         if !isRunningTests {
-            if let path = defaults.string(forKey: Self.lastDeckKey) {
-                try? store.open(URL(fileURLWithPath: path))
-            }
             keyboard.install(for: presentation)
         }
         deckChanged()
     }
 
-    private static var defaultDraftURL: URL {
+    private static func draftURL(named name: String) -> URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return support.appendingPathComponent("Sunummodu/Taslak.\(DeckPackage.fileExtension)")
+        return support.appendingPathComponent("Sunummodu/\(name).\(DeckPackage.fileExtension)")
     }
 
     // MARK: Dosya
@@ -201,10 +215,13 @@ final class AppModel {
     }
 
     private func deckChanged() {
-        if store.isDraft {
-            defaults.removeObject(forKey: Self.lastDeckKey)
-        } else {
-            defaults.set(store.package.url.path, forKey: Self.lastDeckKey)
+        // Testler ve deneme modu, kullanıcının bir dahaki açılışta hangi sunumu göreceğini değiştirmez.
+        if remembersLastDeck {
+            if store.isDraft {
+                defaults.removeObject(forKey: Self.lastDeckKey)
+            } else {
+                defaults.set(store.package.url.path, forKey: Self.lastDeckKey)
+            }
         }
         presentation.deckDidChange()
         regenerateMissingThumbnails()
