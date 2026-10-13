@@ -56,7 +56,8 @@ final class KeyboardHandler {
         case KeyCode.end:
             presentation.goToLast()
         case KeyCode.space:
-            if playback.hasMedia {
+            // Arka plan müzikli resimde de sonraki slayta geçer; müzik Başlat / Durdur düğmesiyle yönetilir.
+            if presentation.currentSlide?.isPlayable == true {
                 playback.togglePlayPause()
             } else {
                 presentation.next()

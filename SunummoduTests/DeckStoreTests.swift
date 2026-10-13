@@ -306,4 +306,77 @@ import Testing
         #expect(store.slides == [Slide(id: id, kind: .image, fileName: "x.png", title: "Eski")])
         #expect(store.slides[0].scaling == .fit)
     }
+
+    // MARK: Arka plan müziği
+
+    private func makeAudio(_ name: String, seconds: Double = 1) throws -> URL {
+        let url = temp.file(name)
+        try TestMedia.writeAudio(to: url, seconds: seconds)
+        return url
+    }
+
+    @Test func backgroundAudioIsSharedByImageSlidesAndUndoable() async throws {
+        await store.importFiles(try makeImages("a.png", "b.png") + [try makeAudio("konuşma.wav")])
+        let ids = Set(store.slides.map(\.id))
+
+        let assigned = try await store.setBackgroundAudio(from: try makeAudio("Fon.wav"), for: ids)
+
+        #expect(assigned == 2)
+        let audio = try #require(store.slides[0].backgroundAudio)
+        #expect(audio.title == "Fon")
+        #expect(store.slides[1].backgroundAudio == audio)
+        #expect(store.slides[2].backgroundAudio == nil)
+        #expect(fileExists(try #require(store.package.backgroundAudioURL(for: store.slides[0]))))
+        #expect(undoManager.undoActionName == "Arka Plan Müziği")
+
+        undoManager.undo()
+        #expect(store.slides.allSatisfy { $0.backgroundAudio == nil })
+        undoManager.redo()
+        #expect(store.slides[0].backgroundAudio == audio)
+        #expect(store.slides[1].backgroundAudio == audio)
+
+        store.removeBackgroundAudio(for: [store.slides[0].id])
+        #expect(store.slides[0].backgroundAudio == nil)
+        #expect(store.slides[1].backgroundAudio == audio)
+    }
+
+    @Test func backgroundAudioNeedsAnImageSlideAndARealAudioFile() async throws {
+        await store.importFiles(try makeImages("a.png") + [try makeAudio("konuşma.wav")])
+
+        let onAudioSlide = try await store.setBackgroundAudio(from: try makeAudio("Fon.wav"), for: [store.slides[1].id])
+        #expect(onAudioSlide == 0)
+
+        let notAudio = try makeImages("resim.png")[0]
+        await #expect(throws: (any Error).self) {
+            try await store.setBackgroundAudio(from: notAudio, for: [store.slides[0].id])
+        }
+        #expect(store.slides.allSatisfy { $0.backgroundAudio == nil })
+    }
+
+    @Test func duplicatedSlideSharesTheSameBackgroundAudio() async throws {
+        await store.importFiles(try makeImages("a.png"))
+        try await store.setBackgroundAudio(from: try makeAudio("Fon.wav"), for: [store.slides[0].id])
+
+        await store.duplicate([store.slides[0].id])
+
+        #expect(store.slides.count == 2)
+        #expect(store.slides[1].backgroundAudio == store.slides[0].backgroundAudio)
+    }
+
+    @Test func unusedBackgroundAudioIsRemovedWhenTheDeckCloses() async throws {
+        await store.importFiles(try makeImages("a.png"))
+        let id = store.slides[0].id
+        try await store.setBackgroundAudio(from: try makeAudio("Eski.wav"), for: [id])
+        let old = try #require(store.package.backgroundAudioURL(for: store.slides[0]))
+        try await store.setBackgroundAudio(from: try makeAudio("Yeni.wav"), for: [id])
+        let new = try #require(store.package.backgroundAudioURL(for: store.slides[0]))
+
+        // Geri alınabildiği sürece eski dosya durur.
+        #expect(fileExists(old))
+        store.close()
+
+        #expect(!fileExists(old))
+        #expect(fileExists(new))
+        #expect(DeckStore(draftURL: store.draftURL).slides[0].backgroundAudio?.title == "Yeni")
+    }
 }

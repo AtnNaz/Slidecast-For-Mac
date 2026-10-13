@@ -3,8 +3,11 @@ import Observation
 
 /// Video ve ses oynatımını yönetir. Çıkış penceresi ve sunucu önizlemesi aynı oynatıcıyı gösterir.
 ///
-/// İki oynatıcı sırayla kullanılır: slayt değişince yeni slayt öbür oynatıcıya yüklenir, eskisi kendi
-/// oynatıcısında kalır. Böylece yumuşak geçiş sürerken giden videonun görüntüsü kaybolmaz.
+/// Slayt medyası için iki oynatıcı sırayla kullanılır: slayt değişince yeni slayt öbür oynatıcıya yüklenir,
+/// eskisi kendi oynatıcısında kalır. Böylece yumuşak geçiş sürerken giden videonun görüntüsü kaybolmaz.
+///
+/// Resim slaytlarının arka plan müziği ayrı bir oynatıcıda çalar ve aynı müziği paylaşan slaytlar arasında
+/// kesilmeden sürer. Müzikli bir resim gösterilirken başlat / durdur ve ilerleme çubuğu müziği yönetir.
 @Observable
 final class PlaybackController {
     static let volumeStep: Float = 0.1
@@ -12,15 +15,22 @@ final class PlaybackController {
 
     @ObservationIgnored private let players = [AVPlayer(), AVPlayer()]
     private var activeIndex = 0
-    /// Gösterilen slaytın oynatıcısı.
+    /// Gösterilen slaytın (video ya da ses) oynatıcısı.
     var player: AVPlayer { players[activeIndex] }
 
-    private(set) var hasMedia = false
+    /// Gösterilen slayt arka plan müziği kullanıyor; oynatma kontrolleri müziği yönetir.
+    private(set) var isMusicActive = false
     private(set) var isPlaying = false
     private(set) var currentTime: Double = 0
-    private(set) var duration: Double = 0
     private(set) var volume: Float
     private(set) var isMuted = false
+    private var slideHasMedia = false
+    private var slideDuration: Double = 0
+    private var musicDuration: Double = 0
+
+    /// Oynatılabilecek bir şey var mı: slaytın kendi medyası ya da arka plan müziği.
+    var hasMedia: Bool { isMusicActive || slideHasMedia }
+    var duration: Double { isMusicActive ? musicDuration : slideDuration }
 
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private var timeObservers: [Any] = []
@@ -31,6 +41,13 @@ final class PlaybackController {
     @ObservationIgnored private var fadingPlayer: AVPlayer?
     @ObservationIgnored private var fadeTask: Task<Void, Never>?
 
+    @ObservationIgnored private let musicPlayer = AVPlayer()
+    @ObservationIgnored private var musicURL: URL?
+    @ObservationIgnored private var musicFadeTask: Task<Void, Never>?
+    @ObservationIgnored private var musicEndObserver: NSObjectProtocol?
+    /// Kullanıcı müziği elle durdurduysa aynı müzikli sonraki slayta geçince kendiliğinden başlamaz.
+    @ObservationIgnored private var musicPausedByUser = false
+
     init(settings: SettingsStore = UserDefaults.standard) {
         self.settings = settings
         volume = Float(settings.number(forKey: Self.volumeKey) ?? 1)
@@ -40,20 +57,29 @@ final class PlaybackController {
             // Video bitince son karede kalır.
             player.actionAtItemEnd = .pause
             player.allowsExternalPlayback = false
-            timeObservers.append(player.addPeriodicTimeObserver(
-                forInterval: CMTime(value: 1, timescale: 10), queue: .main
-            ) { [weak self] time in
-                MainActor.assumeIsolated { self?.playerTimeChanged(time.seconds, from: index) }
-            })
-            statusObservations.append(player.observe(\.timeControlStatus) { [weak self] _, _ in
-                Task { @MainActor in self?.syncPlayingState() }
-            })
+            observe(player) { [weak self] seconds in
+                guard let self, index == self.activeIndex, !self.isMusicActive else { return }
+                self.playerTimeChanged(seconds)
+            }
+        }
+
+        musicPlayer.volume = volume
+        // Müzik bitince başa sarılır (bkz. `loadMusic`); oynatıcı kendiliğinden durmasın.
+        musicPlayer.actionAtItemEnd = .none
+        musicPlayer.allowsExternalPlayback = false
+        observe(musicPlayer) { [weak self] seconds in
+            guard let self, self.isMusicActive else { return }
+            self.playerTimeChanged(seconds)
         }
     }
 
-    /// Yeni slaytın medyasını yükler; `url` nil ise oynatılacak bir şey yoktur (resim slaytı).
-    /// `fadeOut` sıfırdan büyükse giden slayt bu süre boyunca oynamayı sürdürür ve sesi kısılarak kapanır.
-    func load(_ url: URL?, duration knownDuration: Double? = nil, autoplay: Bool = false, fadeOut: Double = 0) {
+    /// Yeni slaytı yükler. `url` slaytın kendi medyasıdır (video ya da ses); nil ise resim slaytıdır ve
+    /// varsa `music` arka planda çalar. `fadeOut` sıfırdan büyükse giden slaytın medyası (ve artık
+    /// kullanılmayan müzik) bu süre boyunca sesi kısılarak kapanır.
+    func load(
+        _ url: URL?, duration knownDuration: Double? = nil, music: URL? = nil,
+        autoplay: Bool = false, fadeOut: Double = 0
+    ) {
         finishFade()
         retire(player, over: fadeOut)
         activeIndex = 1 - activeIndex
@@ -63,26 +89,51 @@ final class PlaybackController {
         incoming.volume = volume
         incoming.isMuted = isMuted
         isScrubbing = false
-        currentTime = 0
-        defer { syncPlayingState() }
-        guard let url else {
+        if let url {
+            let item = AVPlayerItem(url: url)
+            incoming.replaceCurrentItem(with: item)
+            slideHasMedia = true
+            slideDuration = knownDuration ?? 0
+            Task { [weak self] in
+                guard let seconds = try? await item.asset.load(.duration).seconds, seconds.isFinite else { return }
+                guard let self, self.player.currentItem === item else { return }
+                self.slideDuration = seconds
+            }
+            if autoplay {
+                incoming.play()
+            }
+        } else {
             incoming.replaceCurrentItem(with: nil)
-            hasMedia = false
-            duration = 0
-            return
+            slideHasMedia = false
+            slideDuration = 0
         }
-        let item = AVPlayerItem(url: url)
-        incoming.replaceCurrentItem(with: item)
-        hasMedia = true
-        duration = knownDuration ?? 0
-        Task { [weak self] in
-            guard let seconds = try? await item.asset.load(.duration).seconds, seconds.isFinite else { return }
-            guard let self, self.player.currentItem === item else { return }
-            self.duration = seconds
+        // Kendi sesi olan slaytta arka plan müziği çalmaz.
+        setMusic(url == nil ? music : nil, autoplay: autoplay, fadeOut: fadeOut)
+    }
+
+    /// Gösterilen slaytın arka plan müziğini değiştirir. Aynı müzikse çalmayı kesmeden sürdürür; nil ise
+    /// müziği (`fadeOut` süresince kısarak) duraklatır, aynı müziğe dönülürse kaldığı yerden devam eder.
+    func setMusic(_ url: URL?, autoplay: Bool, fadeOut: Double = 0) {
+        if let url {
+            cancelMusicFade()
+            if url != musicURL {
+                loadMusic(url)
+            }
+            isMusicActive = true
+            musicPlayer.volume = volume
+            musicPlayer.isMuted = isMuted
+            if autoplay, !musicPausedByUser {
+                musicPlayer.play()
+            }
+        } else {
+            fadeOutMusic(over: fadeOut)
+            isMusicActive = false
+            musicPausedByUser = false
         }
-        if autoplay {
-            incoming.play()
-        }
+        isScrubbing = false
+        let seconds = isMusicActive ? musicPlayer.currentTime().seconds : 0
+        currentTime = seconds.isFinite ? seconds : 0
+        syncPlayingState()
     }
 
     func togglePlayPause() {
@@ -95,7 +146,13 @@ final class PlaybackController {
 
     func play() {
         guard hasMedia else { return }
-        if duration > 0, currentTime >= duration - 0.05 {
+        if isMusicActive {
+            musicPausedByUser = false
+            cancelMusicFade()
+            musicPlayer.play()
+            return
+        }
+        if slideDuration > 0, currentTime >= slideDuration - 0.05 {
             // Sondayken Başlat'a basılırsa baştan oynatılır.
             player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             currentTime = 0
@@ -103,10 +160,23 @@ final class PlaybackController {
         player.play()
     }
 
-    /// Gösterilen slaytı duraklatır; kapanmakta olan önceki slayt varsa onu da hemen susturur.
+    /// Gösterileni (slayt medyası ya da arka plan müziği) duraklatır; kapanmakta olan önceki slayt varsa
+    /// onu da hemen susturur.
     func pause() {
         finishFade()
+        if isMusicActive {
+            musicPausedByUser = true
+        }
+        controlled.pause()
+    }
+
+    /// Sunum bitince: çalan her şeyi durdurur.
+    func stopAll() {
+        finishFade()
+        cancelMusicFade()
         player.pause()
+        musicPlayer.pause()
+        musicPausedByUser = false
     }
 
     // MARK: İlerleme çubuğu
@@ -115,22 +185,22 @@ final class PlaybackController {
         guard hasMedia, !isScrubbing else { return }
         isScrubbing = true
         resumeAfterScrub = isPlaying
-        player.pause()
+        controlled.pause()
     }
 
     func scrub(to seconds: Double) {
         guard hasMedia else { return }
         currentTime = min(max(seconds, 0), duration)
         let tolerance = CMTime(seconds: 0.1, preferredTimescale: 600)
-        player.seek(to: cmTime(currentTime), toleranceBefore: tolerance, toleranceAfter: tolerance)
+        controlled.seek(to: cmTime(currentTime), toleranceBefore: tolerance, toleranceAfter: tolerance)
     }
 
     func endScrubbing() {
         guard isScrubbing else { return }
         isScrubbing = false
-        player.seek(to: cmTime(currentTime), toleranceBefore: .zero, toleranceAfter: .zero)
+        controlled.seek(to: cmTime(currentTime), toleranceBefore: .zero, toleranceAfter: .zero)
         if resumeAfterScrub {
-            player.play()
+            controlled.play()
         }
     }
 
@@ -139,6 +209,9 @@ final class PlaybackController {
     func setVolume(_ value: Float) {
         volume = min(max(value, 0), 1)
         player.volume = volume
+        if musicFadeTask == nil {
+            musicPlayer.volume = volume
+        }
         settings.setNumber(Double(volume), forKey: Self.volumeKey)
         if volume > 0, isMuted {
             toggleMute()
@@ -152,6 +225,7 @@ final class PlaybackController {
     func toggleMute() {
         isMuted.toggle()
         player.isMuted = isMuted
+        musicPlayer.isMuted = isMuted
     }
 
     // MARK: Giden slayt
@@ -163,16 +237,9 @@ final class PlaybackController {
             outgoing.pause()
             return
         }
-        let startVolume = outgoing.volume
-        let steps = 12
         fadingPlayer = outgoing
         fadeTask = Task { [weak self] in
-            for step in 1...steps {
-                try? await Task.sleep(for: .seconds(seconds / Double(steps)))
-                // İptal edildiyse oynatıcı yeniden kullanılıyordur; ona dokunma.
-                guard !Task.isCancelled else { return }
-                outgoing.volume = startVolume * Float(steps - step) / Float(steps)
-            }
+            guard await Self.rampDown(outgoing, over: seconds) else { return }
             self?.finishFade()
         }
     }
@@ -185,13 +252,87 @@ final class PlaybackController {
         fadingPlayer = nil
     }
 
-    private func playerTimeChanged(_ seconds: Double, from index: Int) {
-        guard index == activeIndex, !isScrubbing, seconds.isFinite else { return }
+    // MARK: Arka plan müziği
+
+    private func loadMusic(_ url: URL) {
+        if let musicEndObserver {
+            NotificationCenter.default.removeObserver(musicEndObserver)
+        }
+        let item = AVPlayerItem(url: url)
+        musicPlayer.replaceCurrentItem(with: item)
+        musicURL = url
+        musicDuration = 0
+        musicPausedByUser = false
+        // Müzik slaytlardan kısa kalırsa baştan çalmayı sürdürür.
+        musicEndObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.musicPlayer.seek(to: .zero) }
+        }
+        Task { [weak self] in
+            guard let seconds = try? await item.asset.load(.duration).seconds, seconds.isFinite else { return }
+            guard let self, self.musicPlayer.currentItem === item else { return }
+            self.musicDuration = seconds
+        }
+    }
+
+    /// Müziği duraklatır ama yerinde bırakır; aynı müziğe dönülürse kaldığı yerden sürer.
+    private func fadeOutMusic(over seconds: Double) {
+        cancelMusicFade()
+        guard seconds > 0, musicPlayer.timeControlStatus != .paused else {
+            musicPlayer.pause()
+            return
+        }
+        let music = musicPlayer
+        musicFadeTask = Task { [weak self] in
+            guard await Self.rampDown(music, over: seconds) else { return }
+            music.pause()
+            self?.cancelMusicFade()
+        }
+    }
+
+    private func cancelMusicFade() {
+        musicFadeTask?.cancel()
+        musicFadeTask = nil
+        musicPlayer.volume = volume
+    }
+
+    /// Sesi adım adım sıfıra indirir. İptal edilirse false döner ve oynatıcıya dokunmayı bırakır
+    /// (oynatıcı o sırada yeniden kullanılıyordur).
+    private static func rampDown(_ player: AVPlayer, over seconds: Double) async -> Bool {
+        let startVolume = player.volume
+        let steps = 12
+        for step in 1...steps {
+            try? await Task.sleep(for: .seconds(seconds / Double(steps)))
+            guard !Task.isCancelled else { return false }
+            player.volume = startVolume * Float(steps - step) / Float(steps)
+        }
+        return true
+    }
+
+    // MARK: Durum
+
+    /// Oynatma kontrollerinin yönettiği oynatıcı.
+    private var controlled: AVPlayer { isMusicActive ? musicPlayer : player }
+
+    private func observe(_ player: AVPlayer, time: @escaping @MainActor (Double) -> Void) {
+        timeObservers.append(player.addPeriodicTimeObserver(
+            forInterval: CMTime(value: 1, timescale: 10), queue: .main
+        ) { seconds in
+            MainActor.assumeIsolated { time(seconds.seconds) }
+        })
+        statusObservations.append(player.observe(\.timeControlStatus) { [weak self] _, _ in
+            Task { @MainActor in self?.syncPlayingState() }
+        })
+    }
+
+    private func playerTimeChanged(_ seconds: Double) {
+        guard !isScrubbing, seconds.isFinite else { return }
         currentTime = seconds
     }
 
     private func syncPlayingState() {
-        isPlaying = player.timeControlStatus != .paused
+        isPlaying = controlled.timeControlStatus != .paused
     }
 
     private func cmTime(_ seconds: Double) -> CMTime {

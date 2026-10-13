@@ -317,4 +317,104 @@ import Testing
         #expect(await waitUntil { videoPlayer.timeControlStatus == .paused })
         presentation.stop()
     }
+
+    // MARK: Arka plan müziği
+
+    /// "a" ve "b" resimlerine aynı müziği atar.
+    private func addSharedMusic(seconds: Double = 4) async throws {
+        let music = temp.file("fon.wav")
+        try TestMedia.writeAudio(to: music, seconds: seconds)
+        try await store.setBackgroundAudio(from: music, for: [store.slides[0].id, store.slides[1].id])
+        presentation.backgroundAudioDidChange()
+    }
+
+    @Test func backgroundMusicDoesNotPlayWhileEditing() async throws {
+        try await addSharedMusic()
+        let playback = presentation.playback
+
+        #expect(playback.isMusicActive)
+        #expect(playback.hasMedia)
+        #expect(await waitUntil { playback.duration > 3.5 })
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(!playback.isPlaying)
+    }
+
+    @Test func backgroundMusicContinuesAcrossSlidesThatShareItAndResumesAfterVideo() async throws {
+        try await addSharedMusic()
+        let playback = presentation.playback
+        presentation.transitionDuration = 0
+        presentation.start()
+        #expect(await waitUntil { playback.isPlaying && playback.currentTime > 0.3 })
+        let onFirst = playback.currentTime
+
+        presentation.next()
+        // Aynı müzik: kesilmeden, baştan başlamadan sürer.
+        #expect(playback.isMusicActive)
+        #expect(playback.isPlaying)
+        #expect(playback.currentTime >= onFirst)
+        #expect(await waitUntil { playback.currentTime > onFirst + 0.3 })
+        let leftAt = playback.currentTime
+
+        presentation.next()
+        // Video: müzik susar, kontroller videoyu yönetir.
+        #expect(presentation.currentSlide?.kind == .video)
+        #expect(!playback.isMusicActive)
+        #expect(playback.hasMedia)
+        #expect(await waitUntil { playback.isPlaying && playback.currentTime > 0.2 && playback.currentTime < leftAt })
+
+        presentation.previous()
+        // Müziğe dönüş: kaldığı yerden.
+        #expect(playback.isMusicActive)
+        #expect(await waitUntil { playback.isPlaying })
+        #expect(playback.currentTime >= leftAt - 0.1)
+        presentation.stop()
+        #expect(await waitUntil { !playback.isPlaying })
+    }
+
+    @Test func musicPausedByHandStaysPausedOnNextSlideWithSameMusic() async throws {
+        try await addSharedMusic()
+        let playback = presentation.playback
+        presentation.transitionDuration = 0
+        presentation.start()
+        #expect(await waitUntil { playback.isPlaying })
+
+        playback.togglePlayPause()
+        #expect(await waitUntil { !playback.isPlaying })
+        presentation.next()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(!playback.isPlaying)
+
+        playback.togglePlayPause()
+        #expect(await waitUntil { playback.isPlaying })
+        presentation.stop()
+    }
+
+    @Test func shortBackgroundMusicLoops() async throws {
+        try await addSharedMusic(seconds: 1)
+        let playback = presentation.playback
+        presentation.start()
+        #expect(await waitUntil { playback.isPlaying && playback.currentTime > 0.5 })
+
+        // Bitince başa sarar: zaman geriye düşer ve çalmaya devam eder.
+        #expect(await waitUntil { playback.currentTime < 0.4 })
+        #expect(playback.isPlaying)
+        presentation.stop()
+    }
+
+    @Test func assigningAndRemovingMusicOnShownSlideTakesEffectImmediately() async throws {
+        let playback = presentation.playback
+        presentation.start()
+        #expect(!playback.hasMedia)
+
+        try await addSharedMusic()
+        #expect(playback.isMusicActive)
+        #expect(await waitUntil { playback.isPlaying })
+
+        store.removeBackgroundAudio(for: [store.slides[0].id])
+        presentation.backgroundAudioDidChange()
+        #expect(!playback.isMusicActive)
+        #expect(!playback.hasMedia)
+        #expect(await waitUntil { !playback.isPlaying })
+        presentation.stop()
+    }
 }

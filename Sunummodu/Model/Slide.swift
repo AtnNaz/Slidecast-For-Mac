@@ -14,6 +14,13 @@ nonisolated enum SlideScaling: String, Codable, Sendable {
     case fill
 }
 
+/// Resim slaytının arkasında çalan müzik. Aynı dosyayı paylaşan slaytlar arasında geçerken kesilmez.
+nonisolated struct BackgroundAudio: Codable, Equatable, Sendable {
+    /// Paketin `Audio/` klasöründeki dosya adı.
+    var fileName: String
+    var title: String
+}
+
 nonisolated struct Slide: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
     var kind: MediaKind
@@ -24,6 +31,8 @@ nonisolated struct Slide: Identifiable, Codable, Equatable, Sendable {
     /// Saniye; yalnızca video ve seste dolu.
     var duration: Double?
     var scaling: SlideScaling
+    /// Yalnızca resim slaytlarında kullanılır.
+    var backgroundAudio: BackgroundAudio?
 
     init(
         id: UUID = UUID(),
@@ -32,7 +41,8 @@ nonisolated struct Slide: Identifiable, Codable, Equatable, Sendable {
         title: String,
         notes: String = "",
         duration: Double? = nil,
-        scaling: SlideScaling = .fit
+        scaling: SlideScaling = .fit,
+        backgroundAudio: BackgroundAudio? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -41,6 +51,7 @@ nonisolated struct Slide: Identifiable, Codable, Equatable, Sendable {
         self.notes = notes
         self.duration = duration
         self.scaling = scaling
+        self.backgroundAudio = backgroundAudio
     }
 
     /// Eski sürümlerin yazdığı sunumlarda sonradan eklenen alanlar bulunmaz.
@@ -53,6 +64,7 @@ nonisolated struct Slide: Identifiable, Codable, Equatable, Sendable {
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         duration = try container.decodeIfPresent(Double.self, forKey: .duration)
         scaling = try container.decodeIfPresent(SlideScaling.self, forKey: .scaling) ?? .fit
+        backgroundAudio = try container.decodeIfPresent(BackgroundAudio.self, forKey: .backgroundAudio)
     }
 
     /// Oynatılan (video ya da ses) bir slayt mı?

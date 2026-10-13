@@ -184,6 +184,35 @@ final class AppModel {
         renamingID = presentation.selection.first
     }
 
+    /// Seçili slaytlardan resim olanlara ortak bir arka plan müziği seçtirir.
+    func chooseBackgroundAudio(for ids: Set<Slide.ID>) {
+        guard !ids.isEmpty else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio]
+        panel.message = ids.count > 1
+            ? "Seçili resimler gösterilirken arkada çalacak müziği seç"
+            : "Bu resim gösterilirken arkada çalacak müziği seç"
+        panel.prompt = "Seç"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            do {
+                if try await store.setBackgroundAudio(from: url, for: ids) == 0 {
+                    errorMessage = "Arka plan müziği yalnızca resim slaytlarına eklenebilir. Video ve ses slaytlarının kendi sesi var."
+                }
+            } catch {
+                errorMessage = "“\(url.lastPathComponent)” müzik olarak kullanılamadı."
+            }
+        }
+    }
+
+    func hasBackgroundAudio(_ ids: Set<Slide.ID>) -> Bool {
+        store.slides.contains { ids.contains($0.id) && $0.backgroundAudio != nil }
+    }
+
+    func containsImage(_ ids: Set<Slide.ID>) -> Bool {
+        store.slides.contains { ids.contains($0.id) && $0.kind == .image }
+    }
+
     /// Ses slaytında sahnede gösterilecek görseli seçtirir.
     func chooseArtwork(for id: Slide.ID) {
         guard let slide = store.slides.first(where: { $0.id == id }) else { return }

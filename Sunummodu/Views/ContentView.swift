@@ -40,6 +40,9 @@ struct ContentView: View {
         .onChange(of: app.store.slides.map(\.id)) {
             app.presentation.slidesDidChange()
         }
+        .onChange(of: app.presentation.currentSlide?.backgroundAudio) {
+            app.presentation.backgroundAudioDidChange()
+        }
         // Düzen menüsündeki Geri Al / Yinele pencerenin yöneticisini kullanır.
         .onAppear {
             app.store.undoManager = undoManager
@@ -146,9 +149,10 @@ private struct CurrentSlidePane: View {
         .aspectRatio(presentation.outputAspect, contentMode: .fit)
         .clipShape(shape)
         .overlay(alignment: .bottomLeading) {
-            if presentation.currentSlide?.kind == .audio {
-                Label("Ses", systemImage: "music.note")
+            if let label = audioLabel(for: presentation.currentSlide) {
+                Label(label, systemImage: "music.note")
                     .font(.callout.weight(.semibold))
+                    .lineLimit(1)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(.black.opacity(0.6), in: Capsule())
@@ -171,6 +175,13 @@ private struct CurrentSlidePane: View {
         .padding(.horizontal, 20)
         .frame(maxHeight: .infinity)
     }
+}
+
+/// Önizlemede (izleyici görmez) slaytın sesini belirten etiket.
+private func audioLabel(for slide: Slide?) -> String? {
+    guard let slide else { return nil }
+    if slide.kind == .audio { return "Ses" }
+    return slide.backgroundAudio.map { "Arka plan: \($0.title)" }
 }
 
 private struct LiveBadge: View {

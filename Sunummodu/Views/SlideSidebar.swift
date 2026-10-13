@@ -111,6 +111,13 @@ struct SlideSidebar: View {
                 get: { app.isFilled(ids) },
                 set: { app.setFill($0, for: ids) }
             ))
+            if app.containsImage(ids) {
+                Divider()
+                Button("Arka Plan Müziği Seç…") { app.chooseBackgroundAudio(for: ids) }
+                if app.hasBackgroundAudio(ids) {
+                    Button("Arka Plan Müziğini Kaldır") { app.store.removeBackgroundAudio(for: ids) }
+                }
+            }
             if ids.count == 1, let slide = app.store.slides.first(where: { ids.contains($0.id) }), slide.kind == .audio {
                 Divider()
                 Button("Görsel Seç…") { app.chooseArtwork(for: slide.id) }
@@ -139,11 +146,23 @@ private struct SlideRow: View {
                 .frame(width: 22, alignment: .trailing)
             VStack(alignment: .leading, spacing: 4) {
                 SlideThumbnail(slide: slide)
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay(alignment: .bottomLeading) {
                         if slide.isPlayable {
                             MediaBadge(systemImage: slide.kind == .audio ? "music.note" : "play.fill", duration: slide.duration)
                                 .padding(4)
+                        } else if let audio = slide.backgroundAudio {
+                            MediaBadge(systemImage: "music.note", duration: nil)
+                                .padding(4)
+                                .padding(.leading, 4)
+                                .help("Arka plan müziği: \(audio.title)")
+                        }
+                    }
+                    // Aynı müziği paylaşan slaytlar aynı renkte şeritle işaretlenir.
+                    .overlay(alignment: .leading) {
+                        if let audio = slide.backgroundAudio {
+                            Rectangle()
+                                .fill(Color.musicGroup(for: audio.fileName))
+                                .frame(width: 5)
                         }
                     }
                     .overlay(alignment: .topTrailing) {
@@ -153,6 +172,7 @@ private struct SlideRow: View {
                                 .help("Ekranı dolduruyor")
                         }
                     }
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay {
                         RoundedRectangle(cornerRadius: 5)
                             .strokeBorder(borderColor, lineWidth: isCurrent ? 2 : 1)

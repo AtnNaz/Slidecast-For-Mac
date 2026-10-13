@@ -65,6 +65,10 @@ struct AppCommands: Commands {
             Button("Sığdır / Ekranı Doldur") { app.toggleFillForSelection() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Divider()
+            Button("Arka Plan Müziği Seç…") { app.chooseBackgroundAudio(for: app.presentation.selection) }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            Button("Arka Plan Müziğini Kaldır") { app.store.removeBackgroundAudio(for: app.presentation.selection) }
+            Divider()
             Button("Sil") { app.deleteSelection() }
         }
         CommandMenu("Sunum") {

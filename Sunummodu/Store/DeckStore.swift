@@ -86,6 +86,24 @@ final class DeckStore {
         applyScaling(Dictionary(uniqueKeysWithValues: ids.map { ($0, scaling) }))
     }
 
+    /// Ses dosyasını pakete kopyalar ve verilen slaytlardan resim olanlara arka plan müziği olarak atar;
+    /// hepsi aynı dosyayı paylaşır. Müzik atanan slayt sayısını döndürür (resim yoksa 0).
+    @discardableResult
+    func setBackgroundAudio(from source: URL, for ids: Set<Slide.ID>) async throws -> Int {
+        let images = deck.slides.filter { ids.contains($0.id) && $0.kind == .image }.map(\.id)
+        guard !images.isEmpty else { return 0 }
+        let target = package
+        let audio = try await MediaImporter.importBackgroundAudio(at: source, into: target)
+        // Kopyalama sürerken başka bir sunuma geçildiyse dosya orada kalır ve o sunum kapanırken temizlenir.
+        guard target == package else { return 0 }
+        applyBackgroundAudio(Dictionary(uniqueKeysWithValues: images.map { ($0, audio) }))
+        return images.count
+    }
+
+    func removeBackgroundAudio(for ids: Set<Slide.ID>) {
+        applyBackgroundAudio(Dictionary(uniqueKeysWithValues: ids.map { ($0, nil) }))
+    }
+
     /// Notlar slayt düzeyinde geri alma adımı oluşturmaz; not alanı kendi geri almasını yapar.
     func setNotes(_ notes: String, for id: Slide.ID) {
         guard let index = deck.slides.firstIndex(where: { $0.id == id }),
@@ -272,6 +290,18 @@ final class DeckStore {
         scheduleSave()
     }
 
+    private func applyBackgroundAudio(_ values: [Slide.ID: BackgroundAudio?]) {
+        var previous: [Slide.ID: BackgroundAudio?] = [:]
+        for index in deck.slides.indices {
+            guard let audio = values[deck.slides[index].id], deck.slides[index].backgroundAudio != audio else { continue }
+            previous[deck.slides[index].id] = deck.slides[index].backgroundAudio
+            deck.slides[index].backgroundAudio = audio
+        }
+        guard !previous.isEmpty else { return }
+        registerUndo("Arka Plan Müziği") { $0.applyBackgroundAudio(previous) }
+        scheduleSave()
+    }
+
     private func registerUndo(_ actionName: String, _ handler: @escaping @MainActor (DeckStore) -> Void) {
         guard let undoManager else { return }
         undoManager.beginUndoGrouping()
@@ -286,6 +316,18 @@ final class DeckStore {
             try? FileManager.default.removeItem(at: trash.url)
         }
         trash = nil
+        removeUnusedBackgroundAudio()
+    }
+
+    /// Hiçbir slaytın kullanmadığı arka plan müziklerini paketten siler. Yalnızca geri alma geçmişi
+    /// bırakılırken çağrılır; o ana kadar geri alınan bir atama dosyasına ihtiyaç duyabilir.
+    private func removeUnusedBackgroundAudio() {
+        let fileManager = FileManager.default
+        let used = Set(deck.slides.compactMap(\.backgroundAudio?.fileName))
+        let files = (try? fileManager.contentsOfDirectory(at: package.audioDirectory, includingPropertiesForKeys: nil)) ?? []
+        for file in files where !used.contains(file.lastPathComponent) {
+            try? fileManager.removeItem(at: file)
+        }
     }
 
     private func moveToTrash(_ slide: Slide) {

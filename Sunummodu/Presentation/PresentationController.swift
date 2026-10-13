@@ -174,12 +174,18 @@ final class PresentationController {
         startedAt = nil
         outputScreenName = nil
         outputAspect = 16 / 9
-        playback.pause()
+        playback.stopAll()
         output.close()
         if let sleepActivity {
             ProcessInfo.processInfo.endActivity(sleepActivity)
         }
         sleepActivity = nil
+    }
+
+    /// Gösterilen slaytın arka plan müziği değiştiğinde (atama, kaldırma, geri alma) çalanı ona uydurur.
+    func backgroundAudioDidChange() {
+        guard let slide = currentSlide, !slide.isPlayable else { return }
+        playback.setMusic(store.package.backgroundAudioURL(for: slide), autoplay: isPresenting)
     }
 
     func togglePresenting() {
@@ -214,7 +220,10 @@ final class PresentationController {
                 fadeOut: activeTransitionDuration
             )
         } else {
-            playback.load(nil, fadeOut: activeTransitionDuration)
+            playback.load(
+                nil, music: package.backgroundAudioURL(for: slide), autoplay: isPresenting,
+                fadeOut: activeTransitionDuration
+            )
         }
         let slides = store.slides
         let neighbors = [index + 1, index - 1]

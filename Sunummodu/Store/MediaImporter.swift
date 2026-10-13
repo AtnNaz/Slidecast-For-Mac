@@ -168,6 +168,21 @@ nonisolated enum MediaImporter {
         }
     }
 
+    /// Ses dosyasını arka plan müziği olarak pakete kopyalar.
+    @concurrent
+    static func importBackgroundAudio(at source: URL, into package: DeckPackage) async throws -> BackgroundAudio {
+        guard kind(of: source) == .audio, try await AVURLAsset(url: source).load(.isPlayable) else {
+            throw ImportError.unsupported
+        }
+        let audio = BackgroundAudio(
+            fileName: mediaFileName(id: UUID(), extension: source.pathExtension),
+            title: source.deletingPathExtension().lastPathComponent
+        )
+        try package.createDirectories()
+        try FileManager.default.copyItem(at: source, to: package.audioDirectory.appendingPathComponent(audio.fileName))
+        return audio
+    }
+
     static func removeFiles(for slide: Slide, in package: DeckPackage) {
         for url in package.fileURLs(for: slide) {
             try? FileManager.default.removeItem(at: url)

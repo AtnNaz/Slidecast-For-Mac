@@ -2,7 +2,8 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// Diskteki `.sunum` paketinin klasör düzeni:
-/// `deck.json`, `Media/` (kopyalanan resim ve videolar), `Thumbs/` (küçük resimler ve video poster kareleri).
+/// `deck.json`, `Media/` (kopyalanan resim ve videolar), `Thumbs/` (küçük resimler ve video poster kareleri),
+/// `Audio/` (slaytların paylaşabildiği arka plan müzikleri).
 nonisolated struct DeckPackage: Equatable, Sendable {
     static let fileExtension = "sunum"
 
@@ -16,6 +17,7 @@ nonisolated struct DeckPackage: Equatable, Sendable {
     var manifestURL: URL { url.appendingPathComponent("deck.json") }
     var mediaDirectory: URL { url.appendingPathComponent("Media", isDirectory: true) }
     var thumbsDirectory: URL { url.appendingPathComponent("Thumbs", isDirectory: true) }
+    var audioDirectory: URL { url.appendingPathComponent("Audio", isDirectory: true) }
 
     func mediaURL(for slide: Slide) -> URL {
         mediaDirectory.appendingPathComponent(slide.fileName)
@@ -38,7 +40,11 @@ nonisolated struct DeckPackage: Equatable, Sendable {
         }
     }
 
-    /// Slayta ait olabilecek bütün dosyalar.
+    func backgroundAudioURL(for slide: Slide) -> URL? {
+        slide.backgroundAudio.map { audioDirectory.appendingPathComponent($0.fileName) }
+    }
+
+    /// Slayta ait olabilecek bütün dosyalar. Arka plan müziği başka slaytlarla paylaşılabildiği için dahil değildir.
     func fileURLs(for slide: Slide) -> [URL] {
         [mediaURL(for: slide), thumbnailURL(for: slide), posterURL(for: slide)]
     }
@@ -47,6 +53,7 @@ nonisolated struct DeckPackage: Equatable, Sendable {
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: thumbsDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
     }
 
     func readDeck() throws -> Deck {

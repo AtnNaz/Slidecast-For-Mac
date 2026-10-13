@@ -25,6 +25,8 @@ struct SnapshotTests {
     @Test func captureWindowStates() async throws {
         let app = AppModel()
         app.screens.target = .window
+        // Örnek video ve müzik sesli olabilir; test sessiz koşsun.
+        app.playback.setVolume(0)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1360, height: 820),
@@ -65,6 +67,13 @@ struct SnapshotTests {
         )
         app.images.removeAll()
         app.store.setNotes("Videodan önce konuyu tanıt.\nBitince soru al.", for: ids[videoIndex])
+
+        // Arka plan müziği: ilk iki resim aynı müziği, PDF sayfaları başka bir müziği paylaşır.
+        let music = app.store.package.mediaURL(for: app.store.slides[audioIndex])
+        try await app.store.setBackgroundAudio(from: music, for: [ids[0], ids[1]])
+        try await app.store.setBackgroundAudio(from: music, for: Set(ids[4...5]))
+        app.presentation.select([ids[0]])
+        try await capture(window, as: "3-arka-plan-muzigi")
 
         // Sunum: geçişin ortası yakalanabilsin diye uzun bir geçiş süresi.
         app.presentation.transitionDuration = 2

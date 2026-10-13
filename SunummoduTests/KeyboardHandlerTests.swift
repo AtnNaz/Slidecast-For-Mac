@@ -106,4 +106,15 @@ import Testing
         let provider = NSItemProvider(object: file as NSURL)
         #expect(await provider.fileURL()?.standardizedFileURL == file.standardizedFileURL)
     }
+
+    @Test func spaceStillAdvancesOnImageWithBackgroundMusic() async throws {
+        let music = temp.file("fon.wav")
+        try TestMedia.writeAudio(to: music, seconds: 2)
+        try await presentation.store.setBackgroundAudio(from: music, for: [presentation.store.slides[0].id])
+        presentation.backgroundAudioDidChange()
+        #expect(presentation.playback.hasMedia)
+
+        #expect(try press(keyCode: 49))
+        #expect(presentation.currentIndex == 1)
+    }
 }
