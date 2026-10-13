@@ -417,4 +417,123 @@ import Testing
         #expect(await waitUntil { !playback.isPlaying })
         presentation.stop()
     }
+
+    // MARK: Tekrar ve otomatik ilerleme
+
+    @Test func loopWrapsAroundOnlyWhilePresenting() {
+        store.setLoops(true)
+        presentation.transitionDuration = 0
+        presentation.goToLast()
+
+        // Düzenlerken liste başa sarmaz.
+        presentation.next()
+        #expect(presentation.currentIndex == 2)
+        #expect(presentation.nextSlide == nil)
+        #expect(!presentation.canGoNext)
+
+        presentation.start()
+        #expect(presentation.nextSlide?.title == "a")
+        #expect(presentation.canGoNext)
+        presentation.next()
+        #expect(presentation.currentIndex == 0)
+        #expect(presentation.canGoPrevious)
+        presentation.previous()
+        #expect(presentation.currentIndex == 2)
+        presentation.stop()
+    }
+
+    @Test func withoutLoopPresentationStaysOnLastSlide() {
+        presentation.transitionDuration = 0
+        presentation.start()
+        presentation.goToLast()
+        presentation.next()
+        #expect(presentation.currentIndex == 2)
+        presentation.goToFirst()
+        presentation.previous()
+        #expect(presentation.currentIndex == 0)
+        presentation.stop()
+    }
+
+    @Test func autoAdvanceWalksThroughTheDeckAndStopsAtTheEndWithoutLoop() async throws {
+        store.setAutoAdvance(seconds: 0.3)
+        presentation.transitionDuration = 0
+        presentation.start()
+
+        // Resimler süreyle, video bitince ilerler.
+        #expect(await waitUntil { presentation.currentIndex == 1 })
+        #expect(await waitUntil { presentation.currentIndex == 2 })
+        let playback = presentation.playback
+        #expect(await waitUntil { playback.currentTime > 0.8 && !playback.isPlaying })
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(presentation.currentIndex == 2)
+        presentation.stop()
+    }
+
+    @Test func autoAdvanceWithLoopStartsOverAfterTheLastSlide() async {
+        store.setLoops(true)
+        store.setAutoAdvance(seconds: 0.3)
+        presentation.transitionDuration = 0
+        presentation.goToLast()
+        presentation.start()
+
+        // Son slayttaki video bitince baştan başlar ve ilerlemeyi sürdürür.
+        #expect(await waitUntil { presentation.currentIndex == 0 })
+        #expect(await waitUntil { presentation.currentIndex == 1 })
+        presentation.stop()
+    }
+
+    @Test func autoAdvanceOnlyRunsWhilePresenting() async throws {
+        store.setAutoAdvance(seconds: 0.2)
+        presentation.showSettingsDidChange()
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(presentation.currentIndex == 0)
+
+        presentation.start()
+        presentation.stop()
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(presentation.currentIndex == 0)
+    }
+
+    @Test func turningAutoAdvanceOnDuringPresentationTakesEffect() async {
+        presentation.transitionDuration = 0
+        presentation.start()
+        store.setAutoAdvance(seconds: 0.2)
+        presentation.showSettingsDidChange()
+        #expect(await waitUntil { presentation.currentIndex == 1 })
+
+        store.setAutoAdvance(seconds: 0)
+        presentation.showSettingsDidChange()
+        try? await Task.sleep(for: .milliseconds(500))
+        #expect(presentation.currentIndex == 1)
+        presentation.stop()
+    }
+
+    @Test func blackoutHoldsAutoAdvance() async throws {
+        store.setAutoAdvance(seconds: 0.3)
+        presentation.transitionDuration = 0
+        presentation.start()
+        presentation.toggleBlackout()
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(presentation.currentIndex == 0)
+
+        presentation.toggleBlackout()
+        #expect(await waitUntil { presentation.currentIndex == 1 })
+        presentation.stop()
+    }
+
+    @Test func singleVideoDeckReplaysWhenLoopingAutomatically() async {
+        presentation.delete([store.slides[0].id, store.slides[1].id])
+        #expect(titles == ["klip"])
+        store.setLoops(true)
+        store.setAutoAdvance(seconds: 0.3)
+        presentation.transitionDuration = 0
+        let playback = presentation.playback
+        presentation.start()
+        #expect(await waitUntil { playback.isPlaying && playback.currentTime > 0.6 })
+
+        // Bitince aynı video baştan oynar.
+        #expect(await waitUntil { playback.isPlaying && playback.currentTime < 0.4 })
+        #expect(presentation.currentSlide?.title == "klip")
+        presentation.stop()
+    }
 }

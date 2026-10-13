@@ -75,6 +75,13 @@ struct SnapshotTests {
         app.presentation.select([ids[0]])
         try await capture(window, as: "3-arka-plan-muzigi")
 
+        // Tekrar ve otomatik ilerleme etiketleri; sunum adımları elle ilerlediği için sonra kapatılır.
+        app.store.setLoops(true)
+        app.store.setAutoAdvance(seconds: 5)
+        try await capture(window, as: "3-tekrar-ve-otomatik")
+        app.store.setLoops(false)
+        app.store.setAutoAdvance(seconds: 0)
+
         // Sunum: geçişin ortası yakalanabilsin diye uzun bir geçiş süresi.
         app.presentation.transitionDuration = 2
         app.presentation.goToFirst()

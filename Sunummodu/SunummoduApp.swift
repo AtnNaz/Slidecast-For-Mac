@@ -85,6 +85,8 @@ struct AppCommands: Commands {
             Button("Sesi Kapat / Aç  (M)") { app.playback.toggleMute() }
             Divider()
             Button("Ekranı Karart  (B)") { app.presentation.toggleBlackout() }
+            Divider()
+            Button("Sunumu Tekrarla  (aç / kapat)") { app.store.setLoops(!app.store.deck.settings.loops) }
         }
     }
 }

@@ -32,7 +32,11 @@ final class PlaybackController {
     var hasMedia: Bool { isMusicActive || slideHasMedia }
     var duration: Double { isMusicActive ? musicDuration : slideDuration }
 
+    /// Slaytın kendi medyası (video ya da ses) sonuna kadar oynadığında çağrılır.
+    @ObservationIgnored var onMediaEnded: (() -> Void)?
+
     @ObservationIgnored private let settings: SettingsStore
+    @ObservationIgnored private var slideEndObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var timeObservers: [Any] = []
     @ObservationIgnored private var statusObservations: [NSKeyValueObservation] = []
     @ObservationIgnored private var isScrubbing = false
@@ -92,6 +96,7 @@ final class PlaybackController {
         if let url {
             let item = AVPlayerItem(url: url)
             incoming.replaceCurrentItem(with: item)
+            observeEnd(of: item)
             slideHasMedia = true
             slideDuration = knownDuration ?? 0
             Task { [weak self] in
@@ -104,6 +109,7 @@ final class PlaybackController {
             }
         } else {
             incoming.replaceCurrentItem(with: nil)
+            observeEnd(of: nil)
             slideHasMedia = false
             slideDuration = 0
         }
@@ -241,6 +247,22 @@ final class PlaybackController {
         fadeTask = Task { [weak self] in
             guard await Self.rampDown(outgoing, over: seconds) else { return }
             self?.finishFade()
+        }
+    }
+
+    private func observeEnd(of item: AVPlayerItem?) {
+        slideEndObservers.forEach(NotificationCenter.default.removeObserver)
+        slideEndObservers = []
+        guard let item else { return }
+        // Oynatılamayan dosya da "bitti" sayılır; otomatik ilerleyen sunum orada takılmasın.
+        let names = [AVPlayerItem.didPlayToEndTimeNotification, AVPlayerItem.failedToPlayToEndTimeNotification]
+        slideEndObservers = names.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: item, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.player.currentItem === item else { return }
+                    self.onMediaEnded?()
+                }
+            }
         }
     }
 

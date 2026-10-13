@@ -40,6 +40,9 @@ struct ContentView: View {
         .onChange(of: app.store.slides.map(\.id)) {
             app.presentation.slidesDidChange()
         }
+        .onChange(of: app.store.deck.settings) {
+            app.presentation.showSettingsDidChange()
+        }
         .onChange(of: app.presentation.currentSlide?.backgroundAudio) {
             app.presentation.backgroundAudioDidChange()
         }
@@ -128,6 +131,7 @@ private struct CurrentSlidePane: View {
                     .truncationMode(.middle)
             }
             Spacer()
+            ShowModeBadges(settings: app.store.deck.settings)
             LiveBadge(isPresenting: presentation.isPresenting, screenName: presentation.outputScreenName)
         }
         .padding(.horizontal, 20)
@@ -230,6 +234,9 @@ struct MainToolbar: ToolbarContent {
             .help("Resim veya video ekle (⌘I)")
         }
         ToolbarItem(placement: .primaryAction) {
+            ShowMenu(store: app.store)
+        }
+        ToolbarItem(placement: .primaryAction) {
             OutputMenu(screens: app.screens, presentation: app.presentation)
         }
         ToolbarItem(placement: .primaryAction) {
@@ -238,6 +245,59 @@ struct MainToolbar: ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             PresentButton(app: app)
         }
+    }
+}
+
+/// Sunumun tekrar etmesi ve kendi kendine ilerlemesi; ayarlar sunumla birlikte kaydedilir.
+private struct ShowMenu: View {
+    let store: DeckStore
+    private static let durations: [Double] = [3, 5, 8, 10, 15, 30, 60]
+
+    var body: some View {
+        let settings = store.deck.settings
+        Menu {
+            Toggle("Sunumu Tekrarla", isOn: Binding(
+                get: { store.deck.settings.loops },
+                set: { store.setLoops($0) }
+            ))
+            Picker("Otomatik ilerleme", selection: Binding(
+                get: { store.deck.settings.autoAdvanceSeconds },
+                set: { store.setAutoAdvance(seconds: $0) }
+            )) {
+                Text("Kapalı (slaytları ben değiştiririm)").tag(0.0)
+                ForEach(Self.durations, id: \.self) { seconds in
+                    Text("Resimler \(Int(seconds)) sn; video ve ses bitince").tag(seconds)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("Tekrar", systemImage: settings.loops || settings.autoAdvanceSeconds > 0 ? "repeat.circle.fill" : "repeat")
+        }
+        .help("Sunumu tekrarla ve otomatik ilerleme")
+    }
+}
+
+/// Tekrar ve otomatik ilerleme açıkken başlıkta görünen küçük etiketler.
+private struct ShowModeBadges: View {
+    let settings: DeckSettings
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if settings.autoAdvanceSeconds > 0 {
+                badge("Otomatik · \(Int(settings.autoAdvanceSeconds)) sn", systemImage: "timer")
+            }
+            if settings.loops {
+                badge("Tekrar", systemImage: "repeat")
+            }
+        }
+    }
+
+    private func badge(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.08), in: Capsule())
     }
 }
 

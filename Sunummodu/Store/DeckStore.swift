@@ -104,6 +104,21 @@ final class DeckStore {
         applyBackgroundAudio(Dictionary(uniqueKeysWithValues: ids.map { ($0, nil) }))
     }
 
+    /// Sunum sırasında son slayttan sonra başa dönülsün mü?
+    func setLoops(_ loops: Bool) {
+        guard deck.settings.loops != loops else { return }
+        deck.settings.loops = loops
+        scheduleSave()
+    }
+
+    /// Resimlerin ekranda kalma süresi; 0 otomatik ilerlemeyi kapatır.
+    func setAutoAdvance(seconds: Double) {
+        let seconds = max(0, seconds)
+        guard deck.settings.autoAdvanceSeconds != seconds else { return }
+        deck.settings.autoAdvanceSeconds = seconds
+        scheduleSave()
+    }
+
     /// Notlar slayt düzeyinde geri alma adımı oluşturmaz; not alanı kendi geri almasını yapar.
     func setNotes(_ notes: String, for id: Slide.ID) {
         guard let index = deck.slides.firstIndex(where: { $0.id == id }),

@@ -379,4 +379,31 @@ import Testing
         #expect(fileExists(new))
         #expect(DeckStore(draftURL: store.draftURL).slides[0].backgroundAudio?.title == "Yeni")
     }
+
+    // MARK: Sunum ayarları
+
+    @Test func showSettingsAreSavedWithTheDeck() async throws {
+        #expect(store.deck.settings == DeckSettings())
+
+        store.setLoops(true)
+        store.setAutoAdvance(seconds: 8)
+        store.flush()
+
+        let reopened = DeckStore(draftURL: store.draftURL)
+        #expect(reopened.deck.settings.loops)
+        #expect(reopened.deck.settings.autoAdvanceSeconds == 8)
+
+        try reopened.resetDraft()
+        #expect(reopened.deck.settings == DeckSettings())
+    }
+
+    @Test func decksWrittenBeforeShowSettingsUseDefaults() throws {
+        let package = DeckPackage(url: temp.file("Eski.sunum"))
+        try package.createDirectories()
+        try Data(#"{"version":1,"slides":[]}"#.utf8).write(to: package.manifestURL)
+
+        try store.open(package.url)
+
+        #expect(store.deck.settings == DeckSettings())
+    }
 }

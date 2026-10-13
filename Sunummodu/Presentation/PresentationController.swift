@@ -33,6 +33,9 @@ final class PresentationController {
     @ObservationIgnored private var sleepActivity: NSObjectProtocol?
     /// Gösterilen slayt listeden çıkarsa (silme, geri alma) aynı sıradaki slayta geçmek için.
     @ObservationIgnored private var lastIndex = 0
+    @ObservationIgnored private var autoAdvanceTask: Task<Void, Never>?
+    /// Karartma sırasında biten video için: karartma kalkınca ilerlenir.
+    @ObservationIgnored private var advanceWhenUnblanked = false
 
     init(
         store: DeckStore, playback: PlaybackController, screens: ScreenManager, images: ImageStore,
@@ -45,6 +48,7 @@ final class PresentationController {
         self.settings = settings
         transitionDuration = settings.number(forKey: Self.transitionKey) ?? 0.5
         output.onUserClose = { [weak self] in self?.stop() }
+        playback.onMediaEnded = { [weak self] in self?.mediaDidEnd() }
         screens.onChange = { [weak self] in self?.relocateOutput() }
     }
 
@@ -57,12 +61,19 @@ final class PresentationController {
     }
 
     var nextSlide: Slide? {
-        guard let index = currentIndex, index + 1 < store.slides.count else { return nil }
-        return store.slides[index + 1]
+        guard let index = currentIndex else { return nil }
+        if index + 1 < store.slides.count { return store.slides[index + 1] }
+        return isLooping ? store.slides.first : nil
     }
 
     var canGoNext: Bool { nextSlide != nil }
-    var canGoPrevious: Bool { (currentIndex ?? 0) > 0 }
+    var canGoPrevious: Bool {
+        guard let index = currentIndex else { return false }
+        return index > 0 || (isLooping && store.slides.count > 1)
+    }
+
+    /// "Sunumu Tekrarla" yalnızca sunum sırasında geçerlidir; düzenlerken liste başa sarmaz.
+    private var isLooping: Bool { isPresenting && store.deck.settings.loops }
 
     /// Yumuşak geçiş yalnızca sunum sırasında uygulanır; düzenlerken slaytlar anında değişir.
     var activeTransitionDuration: Double { isPresenting ? transitionDuration : 0 }
@@ -83,12 +94,32 @@ final class PresentationController {
     }
 
     func next() {
-        go(toIndex: (currentIndex ?? -1) + 1)
+        let index = (currentIndex ?? -1) + 1
+        if index >= store.slides.count, isLooping {
+            wrap(toIndex: 0)
+        } else {
+            go(toIndex: index)
+        }
     }
 
     func previous() {
         guard let index = currentIndex else { return }
-        go(toIndex: index - 1)
+        if index == 0, isLooping {
+            wrap(toIndex: store.slides.count - 1)
+        } else {
+            go(toIndex: index - 1)
+        }
+    }
+
+    /// Sunum tekrar ederken öbür uca geçer. Tek slaytlık sunumda aynı slaytı baştan oynatır.
+    private func wrap(toIndex index: Int) {
+        guard store.slides.indices.contains(index) else { return }
+        if store.slides[index].id == currentID {
+            transitionGeneration += 1
+            loadCurrent()
+        } else {
+            go(toIndex: index)
+        }
     }
 
     func goToFirst() {
@@ -174,6 +205,8 @@ final class PresentationController {
         startedAt = nil
         outputScreenName = nil
         outputAspect = 16 / 9
+        autoAdvanceTask?.cancel()
+        autoAdvanceTask = nil
         playback.stopAll()
         output.close()
         if let sleepActivity {
@@ -199,6 +232,51 @@ final class PresentationController {
     func toggleBlackout() {
         guard isPresenting else { return }
         isBlackedOut.toggle()
+        // Ekran karartılmışken otomatik ilerleme bekler.
+        if isBlackedOut {
+            autoAdvanceTask?.cancel()
+            autoAdvanceTask = nil
+        } else if advanceWhenUnblanked {
+            autoAdvance()
+        } else {
+            scheduleAutoAdvance()
+        }
+    }
+
+    /// Tekrar ya da otomatik ilerleme ayarı değiştiğinde çağrılır.
+    func showSettingsDidChange() {
+        scheduleAutoAdvance()
+    }
+
+    // MARK: Otomatik ilerleme
+
+    /// Resim slaytı için geri sayımı başlatır. Video ve ses slaytları bitince `mediaDidEnd` ile ilerler.
+    private func scheduleAutoAdvance() {
+        autoAdvanceTask?.cancel()
+        autoAdvanceTask = nil
+        let seconds = store.deck.settings.autoAdvanceSeconds
+        guard isPresenting, !isBlackedOut, seconds > 0, let slide = currentSlide, !slide.isPlayable else { return }
+        autoAdvanceTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.autoAdvance()
+        }
+    }
+
+    private func mediaDidEnd() {
+        guard isPresenting, store.deck.settings.autoAdvanceSeconds > 0 else { return }
+        if isBlackedOut {
+            advanceWhenUnblanked = true
+        } else {
+            autoAdvance()
+        }
+    }
+
+    /// Sonraki slayta geçer; sona gelindiyse ve sunum tekrar etmiyorsa son slaytta kalır.
+    private func autoAdvance() {
+        advanceWhenUnblanked = false
+        guard isPresenting, store.deck.settings.autoAdvanceSeconds > 0, canGoNext else { return }
+        next()
     }
 
     func resetTimer() {
@@ -208,6 +286,8 @@ final class PresentationController {
 
     private func loadCurrent() {
         isBlackedOut = false
+        advanceWhenUnblanked = false
+        defer { scheduleAutoAdvance() }
         guard let slide = currentSlide, let index = currentIndex else {
             playback.load(nil)
             return
