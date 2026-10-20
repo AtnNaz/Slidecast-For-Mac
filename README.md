@@ -1,4 +1,4 @@
-# Sunum Modu
+# Slidecast
 
 Resim ve videolardan sunum hazırlayıp projeksiyonda gösteren bir macOS uygulaması. Bilgisayarın ekranı sunucu ekranı olarak kalır. Buradan slaytlar arasında geçebilir, videoyu durdurup başlatabilir, sesi ayarlayabilir, sonraki slaytı ve notlarınızı görebilirsiniz. İzleyici yalnızca tam ekran resmi ya da videoyu görür.
 
@@ -36,8 +36,8 @@ Resim ve videolardan sunum hazırlayıp projeksiyonda gösteren bir macOS uygula
 
 ## İndirme ve kurulum
 
-1. [Releases](../../releases) sayfasından `SunumModu-<sürüm>-macOS.dmg` dosyasını indirin.
-2. DMG'yi açın ve **Sunummodu** simgesini **Applications** klasörüne sürükleyin.
+1. [Releases](../../releases) sayfasından `Slidecast-<sürüm>-macOS.dmg` dosyasını indirin.
+2. DMG'yi açın ve **Slidecast** simgesini **Applications** klasörüne sürükleyin.
 3. Uygulama Apple'a kayıtlı bir geliştirici sertifikasıyla imzalanmadığı için ilk açılışta macOS uyarı verir. Bu durumda:
    - Uygulamayı bir kez açmayı deneyin ve uyarıyı kapatın.
    - **Sistem Ayarları › Gizlilik ve Güvenlik** bölümüne gidin, aşağıdaki **Yine de Aç** düğmesine basın.
