@@ -2,3 +2,4 @@ build.noindex/
 build/
 .DS_Store
 xcuserdata/
+dist/
